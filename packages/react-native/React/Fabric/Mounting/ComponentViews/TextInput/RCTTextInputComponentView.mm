@@ -51,8 +51,12 @@ using namespace facebook::react;
 #if !TARGET_OS_OSX // [macOS]
 @interface RCTTextInputComponentView () <
     RCTBackedTextInputDelegate,
-    RCTTextInputViewProtocol,
-    UIDropInteractionDelegate>
+    RCTTextInputViewProtocol
+#if !TARGET_OS_TV
+    ,
+    UIDropInteractionDelegate
+#endif
+    >
 @end
 #else // [macOS
 @interface RCTTextInputComponentView () <RCTBackedTextInputDelegate, RCTTextInputViewProtocol>
@@ -305,7 +309,7 @@ static NSSet<NSNumber *> *returnKeyTypesSet;
     _backedTextInputView.editable = newTextInputProps.traits.editable;
   }
 
-#if !TARGET_OS_OSX // [macOS]
+#if !TARGET_OS_OSX && !TARGET_OS_TV // [macOS]
   if (newTextInputProps.multiline &&
       newTextInputProps.traits.dataDetectorTypes != oldTextInputProps.traits.dataDetectorTypes) {
     _backedTextInputView.dataDetectorTypes =
@@ -969,7 +973,10 @@ static NSSet<NSNumber *> *returnKeyTypesSet;
   [_backedTextInputView becomeFirstResponder];
 #else // [macOS
   NSWindow *window = [_backedTextInputView window];
-  [window makeFirstResponder:_backedTextInputView];
+  NSResponder *responder = [_backedTextInputView respondsToSelector:@selector(responder)]
+      ? _backedTextInputView.responder
+      : (NSResponder *)_backedTextInputView;
+  [window makeFirstResponder:responder];
 #endif // macOS]
 
   const auto &props = static_cast<const TextInputProps &>(*_props);
@@ -999,8 +1006,13 @@ static NSSet<NSNumber *> *returnKeyTypesSet;
   if ([_backedTextInputView isKindOfClass:[NSTextField class]] &&
       [(NSTextField *)_backedTextInputView currentEditor] != nil) {
     [window makeFirstResponder:nil];
-  } else if ([window firstResponder] == _backedTextInputView.responder) {
-    [window makeFirstResponder:nil];
+  } else {
+    NSResponder *responder = [_backedTextInputView respondsToSelector:@selector(responder)]
+        ? _backedTextInputView.responder
+        : (NSResponder *)_backedTextInputView;
+    if ([window firstResponder] == responder) {
+      [window makeFirstResponder:nil];
+    }
   }
 #endif // macOS]
 }
@@ -1118,6 +1130,7 @@ static NSSet<NSNumber *> *returnKeyTypesSet;
 
   _hasInputAccessoryView = shouldHaveInputAccessoryView;
 
+#if !TARGET_OS_TV
   if (shouldHaveInputAccessoryView) {
     NSString *buttonLabel = inputAccessoryViewButtonLabel != nil ? inputAccessoryViewButtonLabel
                                                                  : [self returnKeyTypeToString:returnKeyType];
@@ -1135,6 +1148,7 @@ static NSSet<NSNumber *> *returnKeyTypesSet;
   } else {
     _backedTextInputView.inputAccessoryView = nil;
   }
+#endif
 
   if (_backedTextInputView.isFirstResponder) {
     [_backedTextInputView reloadInputViews];
@@ -1158,7 +1172,7 @@ static NSSet<NSNumber *> *returnKeyTypesSet;
   return {
       .text = RCTStringFromNSString(_backedTextInputView.attributedText.string),
       .selectionRange = [self _selectionRange],
-      .eventCount = static_cast<int>(_mostRecentEventCount),
+      .contentSize = RCTSizeFromCGSize(_backedTextInputView.contentSize),
 #if !TARGET_OS_OSX // [macOS]
       .contentOffset = RCTPointFromCGPoint(_backedTextInputView.contentOffset),
       .contentInset = RCTEdgeInsetsFromUIEdgeInsets(_backedTextInputView.contentInset),
@@ -1166,7 +1180,7 @@ static NSSet<NSNumber *> *returnKeyTypesSet;
       .contentOffset = {.x = 0, .y = 0},
       .contentInset = EdgeInsets{},
 #endif // macOS]
-      .contentSize = RCTSizeFromCGSize(_backedTextInputView.contentSize),
+      .eventCount = static_cast<int>(_mostRecentEventCount),
       .layoutMeasurement = RCTSizeFromCGSize(_backedTextInputView.bounds.size),
       .zoomScale = 1,
   };

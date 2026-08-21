@@ -6,6 +6,7 @@
  */
 
 #import "RCTViewComponentView.h"
+#import <React/RCTSurfaceHostingProxyRootView.h>
 
 #import <CoreGraphics/CoreGraphics.h>
 #import <QuartzCore/QuartzCore.h>
@@ -68,6 +69,7 @@ const CGFloat BACKGROUND_COLOR_ZPOSITION = -1024.0f;
   BOOL _useCustomContainerView;
   NSMutableSet<NSString *> *_accessibilityOrderNativeIDs;
   RCTSwiftUIContainerViewWrapper *_swiftUIWrapper;
+  BOOL _focusable;
 }
 
 #ifdef RCT_DYNAMIC_FRAMEWORKS
@@ -82,7 +84,7 @@ const CGFloat BACKGROUND_COLOR_ZPOSITION = -1024.0f;
   if (self = [super initWithFrame:frame]) {
     _props = ViewShadowNode::defaultSharedProps();
     _reactSubviews = [NSMutableArray new];
-#if !TARGET_OS_OSX // [macOS]
+#if !TARGET_OS_OSX && !TARGET_OS_TV // [macOS]
     self.multipleTouchEnabled = YES;
 #endif // [macOS]
     _useCustomContainerView = NO;
@@ -122,8 +124,25 @@ const CGFloat BACKGROUND_COLOR_ZPOSITION = -1024.0f;
   }
 }
 
+// Rejects hits against views whose 2D transform collapses an axis (e.g. `scaleX: 0`,
+// `scaleY: 0`, or any other non-invertible affine). Such views are visually degenerate, and
+// UIKit's `-convertPoint:fromView:` falls back to the original matrix when
+// `CGAffineTransformInvert` can't invert, so without this check the degenerate transform is
+// applied to the touch point and the view can still register hits along the collapsed axis.
+static BOOL RCTLayerTransformCollapsesAxis(CALayer *layer)
+{
+  CATransform3D t = layer.transform;
+  // Determinant of the 2x2 projection onto the XY plane. Anything non-zero is invertible; we
+  // treat values within float epsilon as zero to avoid numerical issues near machine precision.
+  CGFloat det = t.m11 * t.m22 - t.m12 * t.m21;
+  return fabs(det) < (CGFloat)1e-6;
+}
+
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event
 {
+  if (RCTLayerTransformCollapsesAxis(self.layer)) {
+    return NO;
+  }
   if (UIEdgeInsetsEqualToEdgeInsets(self.hitTestEdgeInsets, UIEdgeInsetsZero)) {
     return [super pointInside:point withEvent:event];
   }
@@ -210,11 +229,18 @@ const CGFloat BACKGROUND_COLOR_ZPOSITION = -1024.0f;
     [_reactSubviews removeObjectAtIndex:index];
   } else {
     RCTAssert(
-        childComponentView.superview == self.currentContainerView,
-        @"Attempt to unmount a view which is mounted inside different view. (parent: %@, child: %@, index: %@)",
+        childComponentView.superview != nil,
+        @"Attempt to unmount a view which is not mounted. (parent: %@, child: %@, index: %@)",
         self,
         childComponentView,
         @(index));
+    RCTAssert(
+        childComponentView.superview == self.currentContainerView,
+        @"Attempt to unmount a view which is mounted inside a different view. (parent: %@, child: %@, index: %@, existing parent: %@)",
+        self,
+        childComponentView,
+        @(index),
+        @([childComponentView.superview tag]));
     RCTAssert(
         (self.currentContainerView.subviews.count > index) &&
             [self.currentContainerView.subviews objectAtIndex:index] == childComponentView,
@@ -227,6 +253,30 @@ const CGFloat BACKGROUND_COLOR_ZPOSITION = -1024.0f;
   }
 
   [childComponentView removeFromSuperview];
+}
+
+- (void)_updateRemoveClippedSubviewsState
+{
+  if (_removeClippedSubviews) {
+    // Toggled ON: populate _reactSubviews from the current view hierarchy.
+    // Actual clipping will happen on the next scroll event.
+    RCTAssert(
+        _reactSubviews.count == 0,
+        @"_reactSubviews should be empty when toggling removeClippedSubviews on. (view: %@, count: %@)",
+        self,
+        @(_reactSubviews.count));
+    if (self.currentContainerView.subviews.count > 0) {
+      _reactSubviews = [NSMutableArray arrayWithArray:self.currentContainerView.subviews];
+    }
+  } else {
+    // Toggled OFF: re-mount all children in the correct order, then clear the tracking array.
+    // addSubview: on an already-present child moves it to the front, so iterating in order
+    // produces the correct subview ordering.
+    for (RCTUIView *view in _reactSubviews) { // [macOS]
+      [self.currentContainerView addSubview:view];
+    }
+    [_reactSubviews removeAllObjects];
+  }
 }
 
 - (void)updateClippedSubviewsWithClipRect:(CGRect)clipRect relativeToView:(RCTUIView *)clipView // [macOS]
@@ -294,9 +344,7 @@ const CGFloat BACKGROUND_COLOR_ZPOSITION = -1024.0f;
   if (!ReactNativeFeatureFlags::enableViewCulling()) {
     if (oldViewProps.removeClippedSubviews != newViewProps.removeClippedSubviews) {
       _removeClippedSubviews = newViewProps.removeClippedSubviews;
-      if (_removeClippedSubviews && self.currentContainerView.subviews.count > 0) {
-        _reactSubviews = [NSMutableArray arrayWithArray:self.currentContainerView.subviews];
-      }
+      [self _updateRemoveClippedSubviewsState];
     }
   }
 
@@ -450,6 +498,7 @@ const CGFloat BACKGROUND_COLOR_ZPOSITION = -1024.0f;
 
   // `accessibilityShowsLargeContentViewer`
   if (oldViewProps.accessibilityShowsLargeContentViewer != newViewProps.accessibilityShowsLargeContentViewer) {
+#if !TARGET_OS_TV
     if (@available(iOS 13.0, *)) {
       if (newViewProps.accessibilityShowsLargeContentViewer) {
         self.showsLargeContentViewer = YES;
@@ -459,13 +508,16 @@ const CGFloat BACKGROUND_COLOR_ZPOSITION = -1024.0f;
         self.showsLargeContentViewer = NO;
       }
     }
+#endif
   }
 
   // `accessibilityLargeContentTitle`
   if (oldViewProps.accessibilityLargeContentTitle != newViewProps.accessibilityLargeContentTitle) {
+#if !TARGET_OS_TV
     if (@available(iOS 13.0, *)) {
       self.largeContentTitle = RCTNSStringFromStringNilIfEmpty(newViewProps.accessibilityLargeContentTitle);
     }
+#endif
   }
 #endif // [macOS]
 
@@ -562,6 +614,13 @@ const CGFloat BACKGROUND_COLOR_ZPOSITION = -1024.0f;
     needsInvalidateLayer = YES;
   }
 
+  // `focusable`
+#if TARGET_OS_TV
+  if (oldViewProps.focusable != newViewProps.focusable) {
+    _focusable = (bool)newViewProps.focusable;
+  }
+#endif
+
   // `mixBlendMode`
   if (oldViewProps.mixBlendMode != newViewProps.mixBlendMode) {
     switch (newViewProps.mixBlendMode) {
@@ -609,6 +668,9 @@ const CGFloat BACKGROUND_COLOR_ZPOSITION = -1024.0f;
         break;
       case BlendMode::Luminosity:
         self.layer.compositingFilter = @"luminosityBlendMode";
+        break;
+      case BlendMode::PlusLighter:
+        self.layer.compositingFilter = @"linearDodgeBlendMode";
         break;
       case BlendMode::Normal:
         self.layer.compositingFilter = nil;
@@ -695,6 +757,12 @@ const CGFloat BACKGROUND_COLOR_ZPOSITION = -1024.0f;
   // re-applying individual sub-values which weren't changed.
   [super updateLayoutMetrics:layoutMetrics oldLayoutMetrics:_layoutMetrics];
 
+  // Capture the frame size that was used by updateProps to resolve the
+  // transform, before overwriting _layoutMetrics. This is important because
+  // _layoutMetrics may be stale (e.g., from a recycled view) and differ from
+  // the oldLayoutMetrics parameter (which comes from the shadow tree).
+  auto previousFrameSize = _layoutMetrics.frame.size;
+
   _layoutMetrics = layoutMetrics;
   _needsInvalidateLayer = YES;
 
@@ -712,8 +780,12 @@ const CGFloat BACKGROUND_COLOR_ZPOSITION = -1024.0f;
     _backgroundColorLayer.frame = CGRectMake(0, 0, self.layer.bounds.size.width, self.layer.bounds.size.height);
   }
 
+  // Recompute the transform whenever the layout size differs from what was
+  // used in updateProps. Using previousFrameSize (the stored _layoutMetrics)
+  // instead of the oldLayoutMetrics parameter ensures correctness even when
+  // the view was recycled with stale dimensions.
   if ((_props->transformOrigin.isSet() || !_props->transform.operations.empty()) &&
-      layoutMetrics.frame.size != oldLayoutMetrics.frame.size) {
+      layoutMetrics.frame.size != previousFrameSize) {
     auto newTransform = _props->resolveTransform(layoutMetrics);
 #if !TARGET_OS_OSX // [macOS]
     self.layer.transform = RCTCATransform3DFromTransformMatrix(newTransform);
@@ -767,16 +839,67 @@ const CGFloat BACKGROUND_COLOR_ZPOSITION = -1024.0f;
     self.layer.opacity = (float)props.opacity;
   }
 
+  // Clean up box shadow layers to prevent cross-component contamination
+  if (_boxShadowLayers != nullptr) {
+    for (CALayer *boxShadowLayer = nullptr in _boxShadowLayers) {
+      [boxShadowLayer removeFromSuperlayer];
+    }
+    [_boxShadowLayers removeAllObjects];
+    _boxShadowLayers = nil;
+  }
+
+  // Clean up other visual layers
+  [_backgroundColorLayer removeFromSuperlayer];
+  _backgroundColorLayer = nil;
+  [_borderLayer removeFromSuperlayer];
+  _borderLayer = nil;
+  [_outlineLayer removeFromSuperlayer];
+  _outlineLayer = nil;
+  [_filterLayer removeFromSuperlayer];
+  _filterLayer = nil;
+  [self clearExistingBackgroundImageLayers];
+
   _propKeysManagedByAnimated_DO_NOT_USE_THIS_IS_BROKEN = nil;
   _eventEmitter.reset();
   _isJSResponder = NO;
   _removeClippedSubviews = NO;
   _reactSubviews = [NSMutableArray new];
 #if TARGET_OS_OSX // [macOS
-    _allowsVibrancy = NO;
-    self.acceptsFirstMouse = NO;
-    self.mouseDownCanMoveWindow = YES;
+    // upstream #3008 (31e47c8535, cherry-picked): do NOT reset
+    // _allowsVibrancy / acceptsFirstMouse / mouseDownCanMoveWindow here.
+    // They are prop-derived; resetting them on recycle left recycled
+    // views with defaults instead of the values their next props set.
+
+    // Mouse-tracking state must NOT survive recycling — it belongs to the
+    // view's previous occupant, not its next one.
+    //
+    // `mouseEntered:` early-returns while `_hasMouseOver` is set, so a view
+    // recycled while the pointer happened to be over it comes back
+    // permanently deaf to hover: its next occupant never receives
+    // MouseEnter, and anything gated on hover (a row highlight, hover-only
+    // controls) never appears for that row. In a virtualized list, where
+    // recycling is constant and the pointer sits over the list the whole
+    // time, this reads as "hover works on some rows and not others" with no
+    // pattern — the dead rows are simply the recycled ones.
+    //
+    // The tracking area is likewise the previous occupant's: drop it and let
+    // `updateTrackingAreas` install a fresh one. Same for the clip-view
+    // bounds observer, which is registered against the scroll view the view
+    // used to live in and would otherwise be stale (and missing) if the view
+    // is recycled into a different scroll view.
+    _hasMouseOver = NO;
+    if (_trackingArea) {
+      [self removeTrackingArea:_trackingArea];
+      _trackingArea = nil;
+    }
+    if (_hasClipViewBoundsObserver) {
+      _hasClipViewBoundsObserver = NO;
+      [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                      name:NSViewBoundsDidChangeNotification
+                                                    object:nil];
+    }
 #endif // macOS]
+  _layoutMetrics = {};
 }
 
 - (void)setPropKeysManagedByAnimated_DO_NOT_USE_THIS_IS_BROKEN:(NSSet<NSString *> *_Nullable)props
@@ -807,7 +930,7 @@ const CGFloat BACKGROUND_COLOR_ZPOSITION = -1024.0f;
 
   BOOL isPointInside = [self pointInside:point withEvent:event];
 
-  UIView *currentContainerView = self.currentContainerView;
+  RCTPlatformView *currentContainerView = self.currentContainerView; // [macOS]
 
   BOOL clipsToBounds = false;
 
@@ -1045,8 +1168,18 @@ static RCTBorderStyle RCTBorderStyleFromOutlineStyle(OutlineStyle outlineStyle)
 // `blur` applied, we need to wrap it in a SwiftUI view to render the effect.
 // In this case, `effectiveContentView` will be the content view inside the
 // SwiftUI wrapper.
-- (UIView *)effectiveContentView
+//
+// macOS: SwiftUI-filter wrapping isn't yet ported (the wrapper assumes
+// UIKit's `UIView` / `RCTSwiftUIContainerViewWrapper` UIKit surface), so
+// the macOS path short-circuits to `return self`. When the SwiftUI port
+// lands for AppKit, gate the body on `enableSwiftUIBasedFilters()` &&
+// !TARGET_OS_OSX. Return type is `RCTPlatformView*` so the macOS caller
+// at currentContainerView compiles. [macOS]
+- (RCTPlatformView *)effectiveContentView // [macOS]
 {
+#if TARGET_OS_OSX // [macOS
+  return self;
+#else // macOS]
   if (!ReactNativeFeatureFlags::enableSwiftUIBasedFilters()) {
     return self;
   }
@@ -1089,6 +1222,7 @@ static RCTBorderStyle RCTBorderStyleFromOutlineStyle(OutlineStyle outlineStyle)
   }
 
   return effectiveContentView;
+#endif // [macOS]
 }
 
 // This UIView is the UIView that holds all subviews. It is sometimes not self
@@ -1096,7 +1230,7 @@ static RCTBorderStyle RCTBorderStyleFromOutlineStyle(OutlineStyle outlineStyle)
 // the view and is not affected by clipping.
 - (RCTUIView *)currentContainerView // [macOS]
 {
-  UIView *effectiveContentView = self.effectiveContentView;
+  RCTPlatformView *effectiveContentView = self.effectiveContentView; // [macOS]
 
   if (_useCustomContainerView) {
     if (!_containerView) {
@@ -1166,34 +1300,8 @@ static RCTBorderStyle RCTBorderStyleFromOutlineStyle(OutlineStyle outlineStyle)
     layer.shadowPath = nil;
   }
 
-#if !TARGET_OS_OSX // [visionOS]
-  // Stage 1.5. Cursor / Hover Effects
-  if (@available(iOS 17.0, *)) {
-    UIHoverStyle *hoverStyle = nil;
-    if (_props->cursor == Cursor::Pointer) {
-      const RCTCornerInsets cornerInsets =
-          RCTGetCornerInsets(RCTCornerRadiiFromBorderRadii(borderMetrics.borderRadii), UIEdgeInsetsZero);
-#if TARGET_OS_IOS
-      // Due to an Apple bug, it seems on iOS, UIShapes made with `[UIShape shapeWithBezierPath:]`
-      // evaluate their shape on the superviews' coordinate space. This leads to the hover shape
-      // rendering incorrectly on iOS, iOS apps in compatibility mode on visionOS, but not on visionOS.
-      // To work around this, for iOS, we can calculate the border path based on `view.frame` (the
-      // superview's coordinate space) instead of view.bounds.
-      CGPathRef borderPath = RCTPathCreateWithRoundedRect(self.frame, cornerInsets, NULL, NO);
-#else // TARGET_OS_VISION
-      CGPathRef borderPath = RCTPathCreateWithRoundedRect(self.bounds, cornerInsets, NULL, NO);
-#endif
-      UIBezierPath *bezierPath = [UIBezierPath bezierPathWithCGPath:borderPath];
-      CGPathRelease(borderPath);
-      UIShape *shape = [UIShape shapeWithBezierPath:bezierPath];
-
-      hoverStyle = [UIHoverStyle styleWithEffect:[UIHoverAutomaticEffect effect] shape:shape];
-    }
-    [self setHoverStyle:hoverStyle];
-  }
-#endif // [visionOS]
-
-#if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000 /* __IPHONE_17_0 */
+#if !TARGET_OS_OSX && !TARGET_OS_TV && defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && \
+    __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000 /* __IPHONE_17_0 */ // [macOS]
   // Stage 1.5. Cursor / Hover Effects
   if (@available(iOS 17.0, *)) {
     UIHoverStyle *hoverStyle = nil;
@@ -1357,7 +1465,7 @@ static RCTBorderStyle RCTBorderStyleFromOutlineStyle(OutlineStyle outlineStyle)
       if (primitive.type == FilterType::DropShadow) {
         if (_swiftUIWrapper != nullptr && std::holds_alternative<DropShadowParams>(primitive.parameters)) {
           const auto &dropShadowParams = std::get<DropShadowParams>(primitive.parameters);
-          UIColor *shadowColor = RCTUIColorFromSharedColor(dropShadowParams.color);
+          RCTUIColor *shadowColor = RCTUIColorFromSharedColor(dropShadowParams.color); // [macOS]
           [_swiftUIWrapper updateDropShadow:@(dropShadowParams.standardDeviation)
                                           x:@(dropShadowParams.offsetX)
                                           y:@(dropShadowParams.offsetY)
@@ -1641,6 +1749,12 @@ static NSString *RCTRecursiveAccessibilityLabel(RCTUIView *view) // [macOS]
   // Result string is initialized lazily to prevent useless but costly allocations.
   NSMutableString *result = nil;
   for (RCTUIView *subview in view.subviews) { // [macOS]
+    // Skip subviews that have accessibilityElementsHidden set to YES
+#if !TARGET_OS_OSX // [macOS] NSView has no accessibilityElementsHidden
+    if (subview.accessibilityElementsHidden) {
+      continue;
+    }
+#endif // [macOS]
     NSString *label = subview.accessibilityLabel;
     if (!label) {
       label = RCTRecursiveAccessibilityLabel(subview);
@@ -1679,6 +1793,11 @@ static NSString *RCTRecursiveAccessibilityLabel(RCTUIView *view) // [macOS]
 - (BOOL)wantsToCooptLabel
 {
   return !super.accessibilityLabel && super.isAccessibilityElement;
+}
+
+- (BOOL)canBecomeFocused
+{
+  return _focusable;
 }
 
 - (BOOL)isAccessibilityElement
@@ -1780,8 +1899,15 @@ static NSString *RCTRecursiveAccessibilityLabel(RCTUIView *view) // [macOS]
 
   NSMutableArray<UIAccessibilityCustomAction *> *customActions = [NSMutableArray array];
   for (const auto &accessibilityAction : accessibilityActions) {
+    NSString *actionName = RCTNSStringFromString(accessibilityAction.name);
+    NSString *actionLabel = actionName;
+
+    if (accessibilityAction.label.has_value()) {
+      actionLabel = RCTNSStringFromString(accessibilityAction.label.value());
+    }
+
     [customActions
-        addObject:[[UIAccessibilityCustomAction alloc] initWithName:RCTNSStringFromString(accessibilityAction.name)
+        addObject:[[UIAccessibilityCustomAction alloc] initWithName:actionLabel
                                                              target:self
                                                            selector:@selector(didActivateAccessibilityCustomAction:)]];
   }
@@ -1836,7 +1962,17 @@ static NSString *RCTRecursiveAccessibilityLabel(RCTUIView *view) // [macOS]
 - (BOOL)didActivateAccessibilityCustomAction:(UIAccessibilityCustomAction *)action
 {
   if (_eventEmitter && _props->onAccessibilityAction) {
-    _eventEmitter->onAccessibilityAction(RCTStringFromNSString(action.name));
+    // iOS defines the name as the localized label, so iterate through accessibilityActions to find the matching
+    // non-localized action name when passing to JS. This allows for standard action names across platforms.
+    NSString *actionName = action.name;
+    for (const auto &accessibilityAction : _props->accessibilityActions) {
+      if (accessibilityAction.label.has_value() &&
+          [RCTNSStringFromString(accessibilityAction.label.value()) isEqualToString:action.name]) {
+        actionName = RCTNSStringFromString(accessibilityAction.name);
+        break;
+      }
+    }
+    _eventEmitter->onAccessibilityAction(RCTStringFromNSString(actionName));
     return YES;
   } else {
     return NO;
@@ -1890,7 +2026,13 @@ static NSString *RCTRecursiveAccessibilityLabel(RCTUIView *view) // [macOS]
 
 - (void)blur
 {
-  [[self window] resignFirstResponder];
+  // `NSWindow` does not implement `resignFirstResponder`; only NSResponder
+  // subclasses inherit it. Calling the selector on the window is a silent
+  // no-op, leaving programmatic `ref.blur()` from JS without effect. The
+  // correct AppKit equivalent is `makeFirstResponder:nil`, which clears
+  // the current first responder. Mirrors the working pattern at
+  // RCTTextInputComponentView.mm:995-997.
+  [[self window] makeFirstResponder:nil];
 }
 
 - (BOOL)needsPanelToBecomeKey
@@ -2282,16 +2424,32 @@ enum MouseEventType {
   BOOL hasMouseEventHandler =
     _props->hostPlatformEvents[HostPlatformViewEvents::Offset::MouseEnter] ||
     _props->hostPlatformEvents[HostPlatformViewEvents::Offset::MouseLeave];
-  BOOL wouldRecreateIdenticalTrackingArea =
-    hasMouseEventHandler && _trackingArea && NSEqualRects(self.bounds, [_trackingArea rect]);
+  // The tracking area is created with `NSTrackingInVisibleRect`, which makes
+  // AppKit keep its rect glued to the view's visible area for as long as it
+  // is installed — it survives resizes, scrolls and re-layouts without ever
+  // being rebuilt (the `rect:` argument is ignored for such an area).
+  //
+  // It used to be created from a snapshot of `self.bounds`, which went stale
+  // the moment the view was laid out at a different size. Nothing rebuilt it
+  // then: this method runs from `finalizeUpdates` only when the layer needs
+  // invalidating, so a size change driven purely by layout left the hover
+  // rectangle describing the view's OLD geometry — hover firing over a
+  // region the view no longer occupies, and not firing over the region it
+  // does. With the rect self-maintaining, the only question left is whether
+  // an area is installed at all.
+  BOOL trackingAreaIsUpToDate = hasMouseEventHandler && _trackingArea != nil;
 
-  if (!wouldRecreateIdenticalTrackingArea) {
-    [self removeTrackingArea:_trackingArea];
+  if (!trackingAreaIsUpToDate) {
+    if (_trackingArea) {
+      [self removeTrackingArea:_trackingArea];
+      _trackingArea = nil;
+    }
     if (hasMouseEventHandler) {
-      _trackingArea = [[NSTrackingArea alloc] initWithRect:self.bounds
-                                                   options:NSTrackingActiveAlways|NSTrackingMouseEnteredAndExited
-                                                     owner:self
-                                                  userInfo:nil];
+      _trackingArea = [[NSTrackingArea alloc]
+          initWithRect:self.bounds
+               options:NSTrackingActiveAlways|NSTrackingMouseEnteredAndExited|NSTrackingInVisibleRect
+                 owner:self
+              userInfo:nil];
       [self addTrackingArea:_trackingArea];
       [self updateMouseOverIfNeeded];
     }
@@ -2409,6 +2567,17 @@ enum MouseEventType {
   return NO;
 }
 
+#if !TARGET_OS_OSX // [macOS]
+// The block below is iOS-specific: SwiftUI-filter wrapping
+// (`transferVisualPropertiesFromView:`), `UIResponder` overrides
+// (`canBecomeFirstResponder`, `focus`, `blur`, `becomeFirstResponder`,
+// `resignFirstResponder`) and the `handleCommand:` shim that forwards into
+// them. The macOS branch above (between `#if TARGET_OS_OSX` at line 1846
+// and `#endif // macOS]` at line 2381) provides AppKit-flavored equivalents
+// for `focus`, `blur`, and the responder methods; SwiftUI-filter wrapping is
+// not yet ported to macOS (see `effectiveContentView` above, which short-
+// circuits on macOS). Without this guard the iOS code below is a duplicate
+// declaration on the macOS compile and uses unknown type `UIView`. [macOS]
 - (void)transferVisualPropertiesFromView:(UIView *)sourceView toView:(UIView *)destinationView
 {
   // shadow
@@ -2457,9 +2626,11 @@ enum MouseEventType {
   }
 }
 
+#pragma mark - Focus Events
+
 - (BOOL)canBecomeFirstResponder
 {
-  return YES;
+  return ReactNativeFeatureFlags::enableImperativeFocus();
 }
 
 - (void)handleCommand:(const NSString *)commandName args:(const NSArray *)args
@@ -2475,17 +2646,42 @@ enum MouseEventType {
   }
 }
 
+#if TARGET_OS_TV
+/// Finds the containing RCTSurfaceHostingProxyRootView by walking up the view
+/// hierarchy.
+- (RCTSurfaceHostingProxyRootView *)containingRootView
+{
+  UIView *view = self;
+  while (view != nil) {
+    if ([view isKindOfClass:[RCTSurfaceHostingProxyRootView class]]) {
+      return (RCTSurfaceHostingProxyRootView *)view;
+    }
+    view = view.superview;
+  }
+  return nil;
+}
+#endif
+
 - (void)focus
 {
   [self becomeFirstResponder];
+
+#if TARGET_OS_TV
+  RCTSurfaceHostingProxyRootView *rootView = [self containingRootView];
+  if (rootView == nil) {
+    return;
+  }
+
+  rootView.reactPreferredFocusedView = self;
+  [rootView setNeedsFocusUpdate];
+  [rootView updateFocusIfNeeded];
+#endif
 }
 
 - (void)blur
 {
   [self resignFirstResponder];
 }
-
-#pragma mark - Focus Events
 
 - (BOOL)becomeFirstResponder
 {
@@ -2512,6 +2708,31 @@ enum MouseEventType {
 
   return YES;
 }
+#endif // [macOS]
+
+#if TARGET_OS_TV
+
+- (void)didUpdateFocusInContext:(UIFocusUpdateContext *)context
+       withAnimationCoordinator:(UIFocusAnimationCoordinator *)coordinator
+{
+  if (context.previouslyFocusedView == context.nextFocusedView) {
+    return;
+  }
+
+  // Do not resignFirstRespodner if we lost focus, let whoever took focus
+  // becomeFirstResponder thereby resigning for us. If we resign here,
+  // first responder will be assigned to some ancestor view and they
+  // can temporarily call onFocus/onBlur
+  if (context.nextFocusedView == self) {
+    [self becomeFirstResponder];
+  } else if (context.previouslyFocusedView == self && context.nextFocusedView == nil) {
+    [self resignFirstResponder];
+  }
+
+  [super didUpdateFocusInContext:context withAnimationCoordinator:coordinator];
+}
+
+#endif
 
 @end
 

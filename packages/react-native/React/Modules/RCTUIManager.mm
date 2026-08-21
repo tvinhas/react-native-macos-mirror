@@ -8,6 +8,7 @@
 #import "RCTUIManager.h"
 
 #import <AVFoundation/AVFoundation.h>
+#import <React/RCTDefines.h>
 #import <React/RCTSurfacePresenterStub.h>
 #import <react/featureflags/ReactNativeFeatureFlags.h>
 
@@ -17,7 +18,6 @@
 #import "RCTComponent.h"
 #import "RCTComponentData.h"
 #import "RCTConvert.h"
-#import "RCTDefines.h"
 #import "RCTDevSettings.h" // [macOS]
 #import "RCTEventDispatcherProtocol.h"
 #import "RCTLayoutAnimation.h"
@@ -373,7 +373,7 @@ static NSDictionary *deviceOrientationEventBody(UIDeviceOrientation orientation)
 }
 #endif // [macOS] [visionOS]
 
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS // [macOS] [visionOS]
 - (void)namedOrientationDidChange
 {
   NSDictionary *orientationEvent = deviceOrientationEventBody([UIDevice currentDevice].orientation);
@@ -387,7 +387,7 @@ static NSDictionary *deviceOrientationEventBody(UIDeviceOrientation orientation)
                                                                         body:orientationEvent];
 #pragma clang diagnostic pop
 }
-#endif
+#endif // [macOS] [visionOS]
 
 - (dispatch_queue_t)methodQueue
 {
@@ -1297,7 +1297,7 @@ RCT_EXPORT_METHOD(
             [[RCTComposedViewRegistry alloc] initWithUIManager:strongSelf andRegistry:strongSelf->_viewRegistry];
         block(strongSelf, composedViewRegistry);
       }
-    } @catch (NSException *exception) {
+    } @catch (NSException *__unused exception) {
       RCTLogError(@"Exception thrown while executing UI block: %@", exception);
     }
   };
@@ -1688,11 +1688,11 @@ static RCTPlatformView *_jsResponder; // [macOS]
 {
 }
 
-- (void)registerRootView:(UIView *)rootView
+- (void)registerRootView:(RCTUIView *)rootView // [macOS]
 {
 }
 
-- (UIView *)viewForReactTag:(NSNumber *)reactTag
+- (RCTPlatformView *)viewForReactTag:(NSNumber *)reactTag // [macOS]
 {
   return nil;
 }
@@ -1711,19 +1711,19 @@ static RCTPlatformView *_jsResponder; // [macOS]
   return nil;
 }
 
-- (void)setAvailableSize:(CGSize)availableSize forRootView:(UIView *)rootView
+- (void)setAvailableSize:(CGSize)availableSize forRootView:(RCTUIView *)rootView // [macOS]
 {
 }
 
-- (void)setLocalData:(NSObject *)localData forView:(UIView *)view
+- (void)setLocalData:(NSObject *)localData forView:(RCTPlatformView *)view // [macOS]
 {
 }
 
-- (void)setSize:(CGSize)size forView:(UIView *)view
+- (void)setSize:(CGSize)size forView:(RCTPlatformView *)view // [macOS]
 {
 }
 
-- (void)setIntrinsicContentSize:(CGSize)intrinsicContentSize forView:(UIView *)view
+- (void)setIntrinsicContentSize:(CGSize)intrinsicContentSize forView:(RCTPlatformView *)view // [macOS]
 {
 }
 
@@ -1743,16 +1743,16 @@ static RCTPlatformView *_jsResponder; // [macOS]
 {
 }
 
-- (void)rootViewForReactTag:(NSNumber *)reactTag withCompletion:(void (^__strong)(UIView *__strong))completion
+- (void)rootViewForReactTag:(NSNumber *)reactTag withCompletion:(void (^__strong)(RCTPlatformView *__strong))completion // [macOS]
 {
 }
 
-- (UIView *)viewForNativeID:(NSString *)nativeID withRootTag:(NSNumber *)rootTag
+- (RCTPlatformView *)viewForNativeID:(NSString *)nativeID withRootTag:(NSNumber *)rootTag // [macOS]
 {
   return nil;
 }
 
-- (void)setNativeID:(NSString *)nativeID forView:(UIView *)view
+- (void)setNativeID:(NSString *)nativeID forView:(RCTPlatformView *)view // [macOS]
 {
 }
 
@@ -1760,7 +1760,7 @@ static RCTPlatformView *_jsResponder; // [macOS]
 {
 }
 
-+ (UIView *)JSResponder
++ (RCTPlatformView *)JSResponder // [macOS]
 {
   return nil;
 }

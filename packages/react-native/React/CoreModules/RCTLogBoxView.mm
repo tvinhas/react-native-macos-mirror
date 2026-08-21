@@ -24,7 +24,9 @@
 - (instancetype)initWithFrame:(CGRect)frame
 {
   if ((self = [super initWithFrame:frame]) != nullptr) {
+#if !TARGET_OS_TV
     self.windowLevel = UIWindowLevelStatusBar - 1;
+#endif
     self.backgroundColor = [UIColor clearColor];
   }
   return self;
@@ -52,7 +54,9 @@
 #if !TARGET_OS_OSX // [macOS]
   self = [super initWithWindowScene:window.windowScene];
 
+#if !TARGET_OS_TV
   self.windowLevel = UIWindowLevelStatusBar - 1;
+#endif
   self.backgroundColor = [UIColor clearColor];
 #else // [macOS
   NSRect bounds = NSMakeRect(0, 0, 600, 800);
@@ -112,7 +116,9 @@
   [super layoutIfNeeded];
   NSRect frame = NSMakeRect(self.frame.origin.x, self.frame.origin.y, 600, 800);
   [self setFrame:frame display:NO];
+#ifndef RCT_REMOVE_LEGACY_ARCH
   [_surface setSize:self.frame.size];
+#endif // RCT_REMOVE_LEGACY_ARCH
 }
 #endif // macOS]
 

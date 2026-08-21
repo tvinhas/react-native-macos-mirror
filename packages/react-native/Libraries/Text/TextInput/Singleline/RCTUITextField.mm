@@ -33,7 +33,14 @@
 
 - (NSRect)titleRectForBounds:(NSRect)rect
 {
-  return UIEdgeInsetsInsetRect([super titleRectForBounds:rect], self.textContainerInset);
+  NSRect titleRect = UIEdgeInsetsInsetRect([super titleRectForBounds:rect], self.textContainerInset);
+  // Center the intrinsic text height within the padded control bounds.
+  CGFloat contentHeight = self.cellSize.height;
+  if (contentHeight < titleRect.size.height) {
+    titleRect.origin.y += (titleRect.size.height - contentHeight) / 2;
+    titleRect.size.height = contentHeight;
+  }
+  return titleRect;
 }
 
 - (void)editWithFrame:(NSRect)rect inView:(NSView *)controlView editor:(NSText *)textObj delegate:(id)delegate event:(NSEvent *)event
@@ -423,6 +430,7 @@
 
 - (void)setDisableKeyboardShortcuts:(BOOL)disableKeyboardShortcuts
 {
+  _disableKeyboardShortcuts = disableKeyboardShortcuts;
 #if TARGET_OS_IOS
   // Initialize the initial values only once
   if (_initialValueLeadingBarButtonGroups == nil) {
@@ -439,7 +447,6 @@
     self.inputAssistantItem.leadingBarButtonGroups = _initialValueLeadingBarButtonGroups;
     self.inputAssistantItem.trailingBarButtonGroups = _initialValueTrailingBarButtonGroups;
   }
-  _disableKeyboardShortcuts = disableKeyboardShortcuts;
 #endif
 }
 
@@ -472,7 +479,7 @@
 - (void)buildMenuWithBuilder:(id<UIMenuBuilder>)builder
 {
 #if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000
-  if (@available(iOS 17.0, *)) {
+  if (@available(iOS 17.0, tvOS 17.0, *)) {
     if (_contextMenuHidden) {
       [builder removeMenuForIdentifier:UIMenuAutoFill];
     }

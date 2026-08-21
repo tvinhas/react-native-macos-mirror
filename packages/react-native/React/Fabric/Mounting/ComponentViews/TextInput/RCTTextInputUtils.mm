@@ -58,16 +58,23 @@ void RCTCopyBackedTextInput(
   toTextInput.clearButtonMode = fromTextInput.clearButtonMode;
 #endif // [macOS]
   toTextInput.scrollEnabled = fromTextInput.scrollEnabled;
+  toTextInput.disableKeyboardShortcuts = fromTextInput.disableKeyboardShortcuts;
+  toTextInput.acceptDragAndDropTypes = fromTextInput.acceptDragAndDropTypes;
 #if !TARGET_OS_OSX // [macOS]
   toTextInput.secureTextEntry = fromTextInput.secureTextEntry;
   toTextInput.keyboardType = fromTextInput.keyboardType;
   toTextInput.textContentType = fromTextInput.textContentType;
   toTextInput.smartInsertDeleteType = fromTextInput.smartInsertDeleteType;
   toTextInput.passwordRules = fromTextInput.passwordRules;
-  toTextInput.disableKeyboardShortcuts = fromTextInput.disableKeyboardShortcuts;
-  toTextInput.acceptDragAndDropTypes = fromTextInput.acceptDragAndDropTypes;
 
   [toTextInput setSelectedTextRange:fromTextInput.selectedTextRange notifyDelegate:NO];
+#else // [macOS]
+  toTextInput.enableFocusRing = fromTextInput.enableFocusRing;
+  toTextInput.pointScaleFactor = fromTextInput.pointScaleFactor;
+  toTextInput.automaticSpellingCorrectionEnabled = fromTextInput.automaticSpellingCorrectionEnabled;
+  toTextInput.grammarCheckingEnabled = fromTextInput.grammarCheckingEnabled;
+  toTextInput.continuousSpellCheckingEnabled = fromTextInput.continuousSpellCheckingEnabled;
+  [toTextInput setSelectedTextRange:[fromTextInput selectedTextRange] notifyDelegate:NO];
 #endif // [macOS]
 }
 
@@ -237,7 +244,7 @@ UITextContentType RCTUITextContentTypeFromString(const std::string &contentType)
       @"oneTimeCode" : UITextContentTypeOneTimeCode,
     }];
 
-    if (@available(iOS 15.0, *)) {
+    if (@available(iOS 15.0, tvOS 15.0, *)) {
       [mutableContentTypeMap addEntriesFromDictionary:@{
         @"dateTime" : UITextContentTypeDateTime,
         @"flightNumber" : UITextContentTypeFlightNumber,
@@ -246,7 +253,7 @@ UITextContentType RCTUITextContentTypeFromString(const std::string &contentType)
     }
 
 #if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000 /* __IPHONE_17_0 */
-    if (@available(iOS 17.0, *)) {
+    if (@available(iOS 17.0, tvOS 17.0, *)) {
       [mutableContentTypeMap addEntriesFromDictionary:@{
         @"creditCardExpiration" : UITextContentTypeCreditCardExpiration,
         @"creditCardExpirationMonth" : UITextContentTypeCreditCardExpirationMonth,
@@ -292,6 +299,7 @@ UITextSmartInsertDeleteType RCTUITextSmartInsertDeleteTypeFromOptionalBool(std::
       : UITextSmartInsertDeleteTypeDefault;
 }
 
+#if !TARGET_OS_TV
 UIDataDetectorTypes RCTUITextViewDataDetectorTypesFromStringVector(const std::vector<std::string> &dataDetectorTypes)
 {
   static dispatch_once_t onceToken;
@@ -319,5 +327,6 @@ UIDataDetectorTypes RCTUITextViewDataDetectorTypesFromStringVector(const std::ve
   }
   return ret;
 }
+#endif // !TARGET_OS_TV
 
 #endif // [macOS]

@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+require 'digest'
 require 'net/http'
 require 'rexml/document'
 require 'open3' # [macOS]
@@ -89,7 +90,7 @@ def hermes_commit_envvar_defined()
 end
 
 def hermes_v1_enabled()
-    return ENV['RCT_HERMES_V1_ENABLED'] == "1"
+    return ENV['RCT_HERMES_V1_ENABLED'] != "0"
 end
 
 def force_build_from_tag(react_native_path)
@@ -251,14 +252,22 @@ def hermes_commit_at_merge_base()
     commit = nil
     Dir.mktmpdir do |tmpdir|
         hermes_git_dir = File.join(tmpdir, "hermes.git")
-        # Explicitly use Hermes 'main' branch since the default branch changed to 'static_h' (Hermes V1)
-        `git clone -q --bare --filter=blob:none --single-branch --branch main #{HERMES_GITHUB_URL} "#{hermes_git_dir}"`
+        # Pick the Hermes branch that matches the engine variant we resolve at:
+        #   V1 (Hermes 0.83+ split package) lives on `static_h`
+        #   V0 (legacy) lives on `main`
+        # Without this gate, RCT_HERMES_V1_ENABLED=1 + from-source fallback
+        # (no Maven artifact, RCT_BUILD_HERMES_FROM_SOURCE=true) would clone
+        # V0 source while the rest of the podspec expects hermesvm.framework
+        # (V1) artifacts. Mirror of the same fix on the JS side in PR #2952.
+        hermes_branch = hermes_v1_enabled() ? "static_h" : "main"
+        `git clone -q --bare --filter=blob:none --single-branch --branch #{hermes_branch} #{HERMES_GITHUB_URL} "#{hermes_git_dir}"`
 
-        # If all goes well, this will be the commit hash of Hermes at the time of the merge base on branch 'main'
-        commit = `git --git-dir="#{hermes_git_dir}" rev-list -1 --before="#{timestamp}" refs/heads/main`.strip
+        # Resolve the Hermes commit at the time of the merge base on the
+        # chosen branch.
+        commit = `git --git-dir="#{hermes_git_dir}" rev-list -1 --before="#{timestamp}" refs/heads/#{hermes_branch}`.strip
         if commit.empty?
             abort <<-EOS
-            [Hermes] Unable to find the Hermes commit hash at time #{timestamp} on branch 'main'.
+            [Hermes] Unable to find the Hermes commit hash at time #{timestamp} on branch '#{hermes_branch}'.
             EOS
         end
     end
@@ -294,16 +303,102 @@ def download_stable_hermes(react_native_path, version, configuration)
     download_hermes_tarball(react_native_path, tarball_url, version, configuration)
 end
 
-def download_hermes_tarball(react_native_path, tarball_url, version, configuration)
-    destination_path = configuration == nil ?
-        "#{artifacts_dir()}/hermes-ios-#{version}.tar.gz" :
-        "#{artifacts_dir()}/hermes-ios-#{version}-#{configuration}.tar.gz"
+def shared_cache_dir()
+    return File.join(Dir.home, "Library", "Caches", "ReactNative")
+end
 
-    unless File.exist?(destination_path)
+def fetch_maven_sha1(tarball_url)
+    sha1 = `curl -sL "#{tarball_url}.sha1"`.strip
+    return sha1.downcase if $?.success? && sha1.match?(/\A[a-fA-F0-9]{40}\z/)
+    nil
+end
+
+def skip_caches?
+    ENV['RCT_SKIP_CACHES'] == '1'
+end
+
+def validate_hermes_tarball(path, tarball_url)
+    expected_sha1 = fetch_maven_sha1(tarball_url)
+    basename = File.basename(path)
+    if expected_sha1.nil?
+      hermes_log("SHA1 not available from Maven for #{basename}. Skipping validation.", :info)
+      return true
+    end
+    actual_sha1 = Digest::SHA1.file(path).hexdigest
+    if actual_sha1 == expected_sha1
+      hermes_log("SHA1 verified for #{basename}", :info)
+      return true
+    end
+    hermes_log("SHA1 mismatch for #{basename}: expected #{expected_sha1}, got #{actual_sha1}", :error)
+    return false
+end
+
+def download_hermes_tarball(react_native_path, tarball_url, version, configuration)
+    filename = configuration == nil ?
+        "hermes-ios-#{version}.tar.gz" :
+        "hermes-ios-#{version}-#{configuration}.tar.gz"
+    destination_path = "#{artifacts_dir()}/#{filename}"
+
+    if File.exist?(destination_path)
+      hermes_log("Tarball #{filename} already exists in Pods. Skipping download.", :info)
+      return destination_path
+    end
+
+    `mkdir -p "#{artifacts_dir()}"`
+
+    if skip_caches?
+      hermes_log("RCT_SKIP_CACHES is set. Downloading #{filename} directly (bypassing shared cache).", :info)
+      tmp_file = "#{artifacts_dir()}/hermes-ios.download"
+      `curl -A "react-native-#{version}" "#{tarball_url}" -Lo "#{tmp_file}" && mv "#{tmp_file}" "#{destination_path}"`
+      unless File.exist?(destination_path)
+        abort("[Hermes] Failed to download #{filename} from #{tarball_url}. Aborting.")
+      end
+      return destination_path
+    end
+
+    cached_path = File.join(shared_cache_dir(), filename)
+    if File.exist?(cached_path)
+      hermes_log("Verifying checksum for cached #{filename}...", :info)
+      if validate_hermes_tarball(cached_path, tarball_url)
+        hermes_log("Cache hit: copying #{filename} from shared cache (#{shared_cache_dir()})", :info)
+        FileUtils.cp(cached_path, destination_path)
+      else
+        hermes_log("Shared cache file #{filename} failed SHA verification. Re-downloading.", :info)
+        File.delete(cached_path)
+        tmp_file = "#{artifacts_dir()}/hermes-ios.download"
+        `curl -A "react-native-#{version}" "#{tarball_url}" -Lo "#{tmp_file}" && mv "#{tmp_file}" "#{destination_path}"`
+        unless File.exist?(destination_path)
+          abort("[Hermes] Failed to download #{filename} from #{tarball_url}. Aborting.")
+        end
+        hermes_log("Verifying checksum for downloaded #{filename}...", :info)
+        if validate_hermes_tarball(destination_path, tarball_url)
+          FileUtils.cp(destination_path, cached_path)
+          hermes_log("Saved #{filename} to shared cache (#{shared_cache_dir()})", :info)
+        else
+          File.delete(destination_path) if File.exist?(destination_path)
+          abort("[Hermes] Downloaded file #{filename} failed SHA verification. Aborting.")
+        end
+      end
+    else
+      hermes_log("Cache miss: downloading #{filename} from #{tarball_url}", :info)
       # Download to a temporary file first so we don't cache incomplete downloads.
       tmp_file = "#{artifacts_dir()}/hermes-ios.download"
-      `mkdir -p "#{artifacts_dir()}" && curl "#{tarball_url}" -Lo "#{tmp_file}" && mv "#{tmp_file}" "#{destination_path}"`
+      `curl -A "react-native-#{version}" "#{tarball_url}" -Lo "#{tmp_file}" && mv "#{tmp_file}" "#{destination_path}"`
+      unless File.exist?(destination_path)
+        abort("[Hermes] Failed to download #{filename} from #{tarball_url}. Aborting.")
+      end
+      hermes_log("Verifying checksum for downloaded #{filename}...", :info)
+      if validate_hermes_tarball(destination_path, tarball_url)
+        # Save to shared cache for future use
+        `mkdir -p "#{shared_cache_dir()}"`
+        FileUtils.cp(destination_path, cached_path)
+        hermes_log("Saved #{filename} to shared cache (#{shared_cache_dir()})", :info)
+      else
+        File.delete(destination_path) if File.exist?(destination_path)
+        abort("[Hermes] Downloaded file #{filename} failed SHA verification. Aborting.")
+      end
     end
+
     return destination_path
 end
 

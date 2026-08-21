@@ -132,11 +132,11 @@ commands.push(codegenCommand);
 
 const config = {
   commands,
-  platforms: {} /*:: as {[string]: $ReadOnly<{
-      projectConfig: mixed,
-      dependencyConfig: mixed,
-      linkConfig?: mixed,
-      npmPackageName?: mixed,
+  platforms: {} /*:: as {[string]: Readonly<{
+      projectConfig: unknown,
+      dependencyConfig: unknown,
+      linkConfig?: unknown,
+      npmPackageName?: unknown,
     }>} */,
 };
 
@@ -185,7 +185,8 @@ if (apple) {
     },
     projectConfig: apple.getProjectConfig({platformName: 'macos'}),
     dependencyConfig: apple.getProjectConfig({platformName: 'macos'}),
-    npmPackageName: 'react-native-macos',
+    npmPackageName: require('./scripts/codegen/generate-artifacts-executor/constants')
+      .REACT_NATIVE,
   };
 }
 // macOS]

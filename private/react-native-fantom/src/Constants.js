@@ -8,10 +8,10 @@
  * @format
  */
 
-export type FantomRuntimeConstants = $ReadOnly<{
+export type FantomRuntimeConstants = Readonly<{
   isOSS: boolean,
   isRunningFromCI: boolean,
-  forceTestModeForBenchmarks: boolean,
+  runBenchmarks: boolean,
   fantomConfigSummary: string,
   jsHeapSnapshotOutputPathTemplate: string,
   jsHeapSnapshotOutputPathTemplateToken: string,
@@ -21,7 +21,7 @@ export type FantomRuntimeConstants = $ReadOnly<{
 let constants: FantomRuntimeConstants = {
   isOSS: false,
   isRunningFromCI: false,
-  forceTestModeForBenchmarks: false,
+  runBenchmarks: false,
   fantomConfigSummary: '',
   jsHeapSnapshotOutputPathTemplate: '',
   jsHeapSnapshotOutputPathTemplateToken: '',

@@ -14,6 +14,7 @@
 #import <React/RCTLog.h>
 #import <React/RCTUtils.h>
 #import <cxxreact/TraceSection.h>
+#import <react/featureflags/ReactNativeFeatureFlags.h>
 #import <react/renderer/components/root/RootShadowNode.h>
 #import <react/renderer/core/LayoutableShadowNode.h>
 #import <react/renderer/core/RawProps.h>
@@ -286,7 +287,6 @@ static void RCTPerformMountInstructions(
                       componentDescriptor:(const ComponentDescriptor &)componentDescriptor
 {
   RCTAssertMainQueue();
-  NSArray<NSString *> *propsKeysToBeUpdated = extractKeysFromFollyDynamic(props);
   bool updatesTransform = props.find("transform") != props.items().end();
   bool updatesOpacity = props.find("opacity") != props.items().end();
 
@@ -296,13 +296,18 @@ static void RCTPerformMountInstructions(
     return;
   }
 
+  NSSet<NSString *> *propKeys = componentView.propKeysManagedByAnimated_DO_NOT_USE_THIS_IS_BROKEN ?: [NSSet new];
+
+  if (!ReactNativeFeatureFlags::useSharedAnimatedBackend()) {
+    NSArray<NSString *> *propsKeysToBeUpdated = extractKeysFromFollyDynamic(props);
+    propKeys = [propKeys setByAddingObjectsFromArray:propsKeysToBeUpdated];
+  }
+
   SurfaceId surfaceId = RCTSurfaceIdForView(componentView);
   Props::Shared oldProps = [componentView props];
   Props::Shared newProps = componentDescriptor.cloneProps(
       PropsParserContext{surfaceId, *_contextContainer}, oldProps, RawProps(std::move(props)));
 
-  NSSet<NSString *> *propKeys = componentView.propKeysManagedByAnimated_DO_NOT_USE_THIS_IS_BROKEN ?: [NSSet new];
-  propKeys = [propKeys setByAddingObjectsFromArray:propsKeysToBeUpdated];
   componentView.propKeysManagedByAnimated_DO_NOT_USE_THIS_IS_BROKEN = nil;
   [componentView updateProps:newProps oldProps:oldProps];
   componentView.propKeysManagedByAnimated_DO_NOT_USE_THIS_IS_BROKEN = propKeys;
@@ -346,7 +351,19 @@ static void RCTPerformMountInstructions(
     RCTUIView<RCTComponentViewProtocol> *componentView = [_componentViewRegistry findComponentViewWithTag:reactTag]; // [macOS]
 #if !TARGET_OS_OSX // [macOS]
     UIAccessibilityPostNotification(UIAccessibilityLayoutChangedNotification, componentView);
-#endif // [macOS]
+#else // [macOS
+    // Move first-responder to the component view and post the
+    // AppKit-equivalent accessibility notification so VoiceOver picks
+    // up the focus change. Without this branch the Fabric path for
+    // `AccessibilityInfo.setAccessibilityFocus(reactTag)` silently
+    // no-ops on macOS — the old-arch path in
+    // RCTAccessibilityManager.mm:setAccessibilityFocus: does the
+    // equivalent work, which we mirror here.
+    if (componentView != nil) {
+      [[componentView window] makeFirstResponder:componentView];
+      NSAccessibilityPostNotification(componentView, NSAccessibilityFocusedUIElementChangedNotification);
+    }
+#endif // macOS]
   }
 }
 

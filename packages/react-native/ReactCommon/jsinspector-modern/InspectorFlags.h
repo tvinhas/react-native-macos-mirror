@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <mutex>
 #include <optional>
 
 namespace facebook::react::jsinspector_modern {
@@ -19,6 +20,15 @@ class InspectorFlags {
  public:
   static InspectorFlags &getInstance();
 
+  InspectorFlags(const InspectorFlags &) = delete;
+  InspectorFlags &operator=(const InspectorFlags &) = delete;
+
+  /**
+   * Flag determining if the inspector backend should strictly assert that only
+   * a single host is registered.
+   */
+  bool getAssertSingleHostState() const;
+
   /**
    * Flag determining if the modern CDP backend should be enabled.
    */
@@ -29,6 +39,16 @@ class InspectorFlags {
    * (react_native.enable_fusebox_release).
    */
   bool getIsProfilingBuild() const;
+
+  /**
+   * Flag determining if Page.captureScreenshot CDP method is enabled.
+   */
+  bool getScreenshotCaptureEnabled() const;
+
+  /**
+   * Flag determining if frame recording (timings + screenshots) is enabled.
+   */
+  bool getFrameRecordingEnabled() const;
 
   /**
    * Flag determining if network inspection is enabled.
@@ -54,6 +74,9 @@ class InspectorFlags {
 
  private:
   struct Values {
+    bool assertSingleHostState;
+    bool screenshotCaptureEnabled;
+    bool frameRecordingEnabled;
     bool fuseboxEnabled;
     bool isProfilingBuild;
     bool networkInspectionEnabled;
@@ -62,10 +85,9 @@ class InspectorFlags {
   };
 
   InspectorFlags() = default;
-  InspectorFlags(const InspectorFlags &) = delete;
-  InspectorFlags &operator=(const InspectorFlags &) = default;
   ~InspectorFlags() = default;
 
+  mutable std::mutex mutex_;
   mutable std::optional<Values> cachedValues_;
   mutable bool inconsistentFlagsStateLogged_{false};
   bool fuseboxDisabledForTest_{false};

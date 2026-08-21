@@ -19,13 +19,12 @@ import LogBoxButton from './LogBoxButton';
 import * as LogBoxStyle from './LogBoxStyle';
 import * as React from 'react';
 
-type Props = $ReadOnly<{
+const noop = () => {};
+
+component LogBoxInspectorStackFrame(
   frame: StackFrame,
   onPress?: ?(event: GestureResponderEvent) => void,
-}>;
-
-function LogBoxInspectorStackFrame(props: Props): React.Node {
-  const {frame, onPress} = props;
+) {
   const column = frame.column != null && parseInt(frame.column, 10);
   const location =
     getFileName(frame.file) +
@@ -41,7 +40,7 @@ function LogBoxInspectorStackFrame(props: Props): React.Node {
           default: 'transparent',
           pressed: onPress ? LogBoxStyle.getBackgroundColor(1) : 'transparent',
         }}
-        onPress={onPress}
+        onPress={onPress ?? noop}
         style={styles.frame}>
         <Text
           id="logbox_stack_frame_text"
@@ -95,6 +94,7 @@ const styles = StyleSheet.create({
       android: 'monospace',
       ios: 'Menlo',
       macos: 'Menlo',
+      windows: 'Consolas',
     }),
     // macOS]
   },

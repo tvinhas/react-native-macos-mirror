@@ -8,13 +8,17 @@
  * @format
  */
 
-const {create, update} = require('../../../../jest/renderer');
+// [macOS] This legacy Jest test was removed upstream in 0.86 (ported to
+// Fantom in TextInput-itest.js). It is kept in react-native-macos to cover
+// macOS-specific TextInput instance methods (setSelection, setGhostText).
+
 const ReactNative = require('../../../ReactNative/RendererProxy');
 const {
   enter,
   expectRendersMatchingSnapshot,
 } = require('../../../Utilities/ReactNativeTestTools');
 const TextInput = require('../TextInput').default;
+const {create, update} = require('@react-native/jest-preset/jest/renderer');
 const React = require('react');
 const {createRef, useState} = require('react');
 const ReactTestRenderer = require('react-test-renderer');

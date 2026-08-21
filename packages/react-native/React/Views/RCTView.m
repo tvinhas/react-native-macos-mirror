@@ -109,9 +109,14 @@ static NSString *RCTRecursiveAccessibilityLabel(RCTUIView *view) // [macOS]
   NSMutableString *str = nil;
   for (RCTUIView *subview in view.subviews) { // [macOS]
 #if !TARGET_OS_OSX // [macOS]
+    // Skip subviews that have accessibilityElementsHidden set to YES
+    if (subview.accessibilityElementsHidden) {
+      continue;
+    }
     NSString *label = subview.accessibilityLabel;
 #else // [macOS
     NSString *label;
+#ifndef RCT_REMOVE_LEGACY_ARCH
     if ([subview isKindOfClass:[RCTTextView class]]) {
       // on macOS VoiceOver a text element will always have its accessibilityValue read, but will only read it's accessibilityLabel if it's value is set.
       // the macOS RCTTextView accessibilityValue will return its accessibilityLabel if set otherwise return its text.
@@ -119,6 +124,9 @@ static NSString *RCTRecursiveAccessibilityLabel(RCTUIView *view) // [macOS]
     } else {
       label = subview.accessibilityLabel;
     }
+#else
+    label = subview.accessibilityLabel;
+#endif // RCT_REMOVE_LEGACY_ARCH
 #endif // macOS]
     if (!label) {
       label = RCTRecursiveAccessibilityLabel(subview);
@@ -1343,7 +1351,8 @@ static void RCTUpdateShadowPathForView(RCTView *view)
 static void RCTUpdateHoverStyleForView(RCTView *view)
 {
 #if !TARGET_OS_OSX // [macOS]
-#if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000 /* __IPHONE_17_0 */
+#if !TARGET_OS_TV && defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && \
+    __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000 /* __IPHONE_17_0 */
   if (@available(iOS 17.0, *)) {
     UIHoverStyle *hoverStyle = nil;
     if ([view cursor] == RCTCursorPointer) {

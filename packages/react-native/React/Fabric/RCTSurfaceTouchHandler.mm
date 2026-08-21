@@ -16,6 +16,8 @@
 #import "RCTSurfacePointerHandler.h"
 #import "RCTTouchableComponentViewProtocol.h"
 
+#if !TARGET_OS_TV
+
 using namespace facebook::react;
 
 typedef NS_ENUM(NSInteger, RCTTouchEventType) {
@@ -76,6 +78,7 @@ static void UpdateActiveTouchWithUITouch(
   activeTouch.touch.pagePoint = RCTPointFromCGPoint(pagePoint);
 
   activeTouch.touch.timestamp = uiTouch.timestamp;
+  activeTouch.touch.timeStamp = RCTHighResTimeStampFromSeconds(uiTouch.timestamp);
 
 #if !TARGET_OS_OSX // [macOS]
   if (RCTForceTouchAvailable()) {
@@ -572,9 +575,15 @@ RCT_NOT_IMPLEMENTED(-(instancetype)initWithTarget : (id)target action : (SEL)act
     shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer
 {
   BOOL canBePrevented = [self canBePreventedByGestureRecognizer:otherGestureRecognizer];
+#if !TARGET_OS_OSX // [macOS] NSGestureRecognizer has no cancelsTouchesInView
+  if (canBePrevented && otherGestureRecognizer.cancelsTouchesInView) {
+    [self _cancelTouches];
+  }
+#else // [macOS
   if (canBePrevented) {
     [self _cancelTouches];
   }
+#endif // macOS]
   return NO;
 }
 
@@ -587,3 +596,5 @@ RCT_NOT_IMPLEMENTED(-(instancetype)initWithTarget : (id)target action : (SEL)act
 }
 
 @end
+
+#endif // !TARGET_OS_TV

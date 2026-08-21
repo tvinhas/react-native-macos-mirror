@@ -99,17 +99,14 @@ RCT_EXTERN RCTPlatformApplication *__nullable RCTSharedApplication(void); // [ma
 RCT_EXTERN RCTPlatformWindow *__nullable RCTKeyWindow(void); // [macOS]
 
 #if !TARGET_OS_OSX // [macOS]
-// Returns UIStatusBarManager to get it's configuration info.
-RCT_EXTERN UIStatusBarManager *__nullable RCTUIStatusBarManager(void);
-#endif // [macOS]
-
-#if !TARGET_OS_OSX // [macOS]
 // Returns the presented view controller, useful if you need
 // e.g. to present a modal view controller or alert over it
 RCT_EXTERN UIViewController *__nullable RCTPresentedViewController(void);
 
 // Retrieve current window UIStatusBarManager
+#if !TARGET_OS_TV
 RCT_EXTERN UIStatusBarManager *__nullable RCTUIStatusBarManager(void) API_AVAILABLE(ios(13));
+#endif // !TARGET_OS_TV
 #endif // [macOS]
 
 // Does this device support force touch (aka 3D Touch)?
@@ -140,6 +137,10 @@ RCT_EXTERN NSURL *RCTDataURL(NSString *mimeType, NSData *data);
 
 // Gzip functionality - compression level in range 0 - 1 (-1 for default)
 RCT_EXTERN NSData *__nullable RCTGzipData(NSData *__nullable data, float level);
+
+// Gzip decompression - maxDecompressedSize of 0 means no limit, returns nil if
+// limit exceeded or decompression fails
+RCT_EXTERN NSData *__nullable RCTDecompressGzipData(NSData *__nullable data, NSUInteger maxDecompressedSize);
 
 // Returns the relative path within the main bundle for an absolute URL
 // (or nil, if the URL does not specify a path within the main bundle)

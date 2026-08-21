@@ -15,7 +15,13 @@
 static void *TextFieldSelectionObservingContext = &TextFieldSelectionObservingContext;
 
 #if !TARGET_OS_OSX // [macOS]
-@interface RCTBackedTextFieldDelegateAdapter () <UITextFieldDelegate, UITextDropDelegate>
+@interface RCTBackedTextFieldDelegateAdapter () <
+    UITextFieldDelegate
+#if !TARGET_OS_TV
+    ,
+    UITextDropDelegate
+#endif
+    >
 #else // [macOS
 @interface RCTBackedTextFieldDelegateAdapter () <RCTUITextFieldDelegate>
 #endif // macOS]
@@ -36,8 +42,8 @@ static void *TextFieldSelectionObservingContext = &TextFieldSelectionObservingCo
   if (self = [super init]) {
     _backedTextInputView = backedTextInputView;
     backedTextInputView.delegate = self;
-    
-#if !TARGET_OS_OSX // [macOS]
+
+#if !TARGET_OS_OSX && !TARGET_OS_TV // [macOS]
     backedTextInputView.textDropDelegate = self;
 #endif // [macOS]
 
@@ -104,6 +110,15 @@ static void *TextFieldSelectionObservingContext = &TextFieldSelectionObservingCo
   if ([newText isEqualToString:string]) {
     _textDidChangeIsComing = YES;
     return YES;
+  }
+
+  // Clamp the range to the current text length to avoid NSRangeException.
+  NSUInteger textLength = _backedTextInputView.attributedText.length;
+  if (range.location > textLength) {
+    return NO;
+  }
+  if (range.location + range.length > textLength) {
+    range = NSMakeRange(range.location, textLength - range.location);
   }
 
   NSMutableAttributedString *attributedString = [_backedTextInputView.attributedText mutableCopy];
@@ -185,7 +200,8 @@ static void *TextFieldSelectionObservingContext = &TextFieldSelectionObservingCo
 }
 
 
-#if !TARGET_OS_OSX // [macOS]
+#if !TARGET_OS_OSX && !TARGET_OS_TV // [macOS]
+
 #pragma mark - UITextDropDelegate
 
 - (UITextDropEditability)textDroppableView:(UIView<UITextDroppable> *)textDroppableView
@@ -268,8 +284,16 @@ static void *TextFieldSelectionObservingContext = &TextFieldSelectionObservingCo
     }
     //escape
   } else if (commandSelector == @selector(cancelOperation:)) {
-    [textInputDelegate textInputDidCancel];
-    if (![textInputDelegate hasKeyDownEventOrKeyUpEvent:@"Escape"]) {
+    // [macOS] Guard with respondsToSelector — the delegate protocol gained
+    // these methods in 0.83; older delegate objects crash without the check.
+    if ([textInputDelegate respondsToSelector:@selector(textInputDidCancel)]) {
+      [textInputDelegate textInputDidCancel];
+    }
+    BOOL delegateHasEscapeHandler = NO;
+    if ([textInputDelegate respondsToSelector:@selector(hasKeyDownEventOrKeyUpEvent:)]) {
+      delegateHasEscapeHandler = [textInputDelegate hasKeyDownEventOrKeyUpEvent:@"Escape"];
+    }
+    if (!delegateHasEscapeHandler) {
       [[_backedTextInputView window] makeFirstResponder:nil];
     }
     commandHandled = YES;
@@ -304,7 +328,13 @@ static void *TextFieldSelectionObservingContext = &TextFieldSelectionObservingCo
 #pragma mark - RCTBackedTextViewDelegateAdapter (for UITextView)
 
 #if !TARGET_OS_OSX // [macOS]
-@interface RCTBackedTextViewDelegateAdapter () <UITextViewDelegate, UITextDropDelegate>
+@interface RCTBackedTextViewDelegateAdapter () <
+    UITextViewDelegate
+#if !TARGET_OS_TV
+    ,
+    UITextDropDelegate
+#endif
+    >
 #else // [macOS
 @interface RCTBackedTextViewDelegateAdapter () <UITextViewDelegate>
 #endif // macOS]
@@ -332,7 +362,7 @@ static void *TextFieldSelectionObservingContext = &TextFieldSelectionObservingCo
   if (self = [super init]) {
     _backedTextInputView = backedTextInputView;
     backedTextInputView.delegate = self;
-#if !TARGET_OS_OSX // [macOS]
+#if !TARGET_OS_OSX && !TARGET_OS_TV // [macOS]
     backedTextInputView.textDropDelegate = self;
 #endif // [macOS]
   }
@@ -392,13 +422,13 @@ static void *TextFieldSelectionObservingContext = &TextFieldSelectionObservingCo
     return NO;
   }
 
-#if !TARGET_OS_OSX // [macOS]
-  if (range.location + range.length > _backedTextInputView.text.length) {
-    range = NSMakeRange(range.location, _backedTextInputView.text.length - range.location);
-#else // [macOS
-  if (range.location + range.length > _backedTextInputView.string.length) {
-    range = NSMakeRange(range.location, _backedTextInputView.string.length - range.location);
-#endif // macOS]
+  // Clamp the range to the current text length to avoid NSRangeException.
+  NSUInteger textLength = _backedTextInputView.attributedText.length;
+  if (range.location > textLength) {
+    return NO;
+  }
+  if (range.location + range.length > textLength) {
+    range = NSMakeRange(range.location, textLength - range.location);
   } else if ([newText isEqualToString:text]) {
     _textDidChangeIsComing = YES;
     return YES;
@@ -504,12 +534,20 @@ static void *TextFieldSelectionObservingContext = &TextFieldSelectionObservingCo
     commandHandled = textInputDelegate != nil && ![textInputDelegate textInputShouldHandleDeleteForward:_backedTextInputView];
     //escape
   } else if (commandSelector == @selector(cancelOperation:)) {
-    [textInputDelegate textInputDidCancel];
-    if (![textInputDelegate hasKeyDownEventOrKeyUpEvent:@"Escape"]) {
+    // [macOS] Guard with respondsToSelector — the delegate protocol gained
+    // these methods in 0.83; older delegate objects crash without the check.
+    if ([textInputDelegate respondsToSelector:@selector(textInputDidCancel)]) {
+      [textInputDelegate textInputDidCancel];
+    }
+    BOOL delegateHasEscapeHandler = NO;
+    if ([textInputDelegate respondsToSelector:@selector(hasKeyDownEventOrKeyUpEvent:)]) {
+      delegateHasEscapeHandler = [textInputDelegate hasKeyDownEventOrKeyUpEvent:@"Escape"];
+    }
+    if (!delegateHasEscapeHandler) {
       [[_backedTextInputView window] makeFirstResponder:nil];
     }
     commandHandled = YES;
-    
+
   }
 
   return commandHandled;
@@ -547,7 +585,8 @@ static void *TextFieldSelectionObservingContext = &TextFieldSelectionObservingCo
   [_backedTextInputView.textInputDelegate textInputDidChangeSelection];
 }
 
-#if !TARGET_OS_OSX // [macOS]
+#if !TARGET_OS_OSX && !TARGET_OS_TV // [macOS]
+
 #pragma mark - UITextDropDelegate
 
 - (UITextDropEditability)textDroppableView:(UIView<UITextDroppable> *)textDroppableView

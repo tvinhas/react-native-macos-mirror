@@ -12,11 +12,11 @@ plugins {
 }
 
 android {
-  compileSdk = libs.versions.compileSdk.get().toInt()
-  buildToolsVersion = libs.versions.buildTools.get()
+  compileSdk = 36
+  buildToolsVersion = "36.0.0"
   namespace = "com.facebook.react.popupmenu"
 
-  defaultConfig { minSdk = libs.versions.minSdk.get().toInt() }
+  defaultConfig { minSdk = 24 }
 
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -29,7 +29,12 @@ kotlin {
   explicitApi()
 }
 
+tasks.withType<JavaCompile>().configureEach {
+  options.compilerArgs.add("-Xlint:deprecation,unchecked")
+  options.compilerArgs.add("-Werror")
+}
+
 dependencies {
   // Build React Native from source
-  implementation(project(":packages:react-native:ReactAndroid"))
+  implementation("com.facebook.react:react-android")
 }
