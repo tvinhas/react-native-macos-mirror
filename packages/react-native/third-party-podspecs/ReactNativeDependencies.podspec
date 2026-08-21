@@ -15,6 +15,12 @@ begin
 rescue => e
   # Fallback to the parent directory if the above command fails (e.g when building locally in OOT Platform)
   react_native_path = File.join(__dir__, "..", "..")
+  # [macOS] The package is named react-native-macos, so the resolve above
+  # fails, and in this repo the package root is one level up, not two.
+  unless File.exist?(File.join(react_native_path, "package.json"))
+    react_native_path = File.join(__dir__, "..")
+  end
+  # macOS]
 end
 
 # package.json
@@ -53,13 +59,13 @@ Pod::Spec.new do |spec|
     # Check if XCFRAMEWORK_PATH is empty
     if [ -z "$XCFRAMEWORK_PATH" ]; then
       echo "ERROR: XCFRAMEWORK_PATH is empty."
-      exit 0
+      exit 1
     fi
 
     # Check if HEADERS_PATH is empty
     if [ -z "$HEADERS_PATH" ]; then
       echo "ERROR: HEADERS_PATH is empty."
-      exit 0
+      exit 1
     fi
 
     cp -R "$HEADERS_PATH/." Headers
